@@ -4,9 +4,9 @@ var express = require("express");           // web framework external module
 var serveStatic = require('serve-static');  // serve static files
 var socketIo = require("socket.io");        // web socket external module
 var easyrtc = require("easyrtc");           // EasyRTC external module
-var uniqid = require('uniqid');
+var PouchDB = require('pouchdb');
+PouchDB.plugin(require('pouchdb-find'));
 
-var cytoscape = require('cytoscape');       //cytoscape external module
 
 // Set process name
 process.title = "node-easyrtc";

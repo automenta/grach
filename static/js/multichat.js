@@ -1,40 +1,40 @@
-
+"use strict"
 
 //
 //easyRTC stuff
 //
 var selfEasyrtcid = "";
 
+var socketIo = io();
+
 function addToConversation(who, msgType, dataString) {
+
 
     var data = JSON.parse(dataString);
     var content = data.content;
 
+    addMessagetoDB(data);
+
+
     // Escape html special characters, then add linefeeds.
     content = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     content = content.replace(/\n/g, '<br />');
-    
-    //TODO use DOM elements directly, avoid using strings to construct this
-    //TODO use scrollback terminal with fixed limit lines
-    document.getElementById('conversation').innerHTML +=
-        "<b>" + who + ":</b>&nbsp;" + content + "<br />";
 
-    //adds message node connected to author
-    elements.push(
-        {group: "nodes", data: {id: data.messageId, label: content}},
-        {group: "edges", data: {id: data.author + data.messageId, source: data.messageId, target: data.author}}
-    );
+
+
+    //color depending on the id string
+    var nodeColor =  "#" +intToRGB(hashCode(data.author));
+
+    //adds message
+    addNode(data.messageId, content, nodeColor, true);
+
+    //adds message edge connected to author
+    addEdge(data.author + data.messageId, data.messageId, data.author);
 
     //links to parents message if not null
     if (data.parentMessageId !== null) {
-        elements.push(
-            {group: "edges", data: {id: who + data.parentMessageId, source: data.messageId, target: data.parentMessageId}},
-        )
+        addEdge(getDate() + '_' + who + '_' + data.parentMessageId, data.messageId, data.parentMessageId)
     }
-
-    //resets graph
-    generateGraph(elements);
-
 }
 
 
@@ -44,23 +44,64 @@ function connect() {
     easyrtc.connect("easyrtc.instantMessaging", loginSuccess, loginFailure);
 }
 
-
+//TODO refactor this
 function convertListToButtons(roomName, occupants, isPrimary) {
-
 
     var otherClientDiv = document.getElementById('otherClients');
     while (otherClientDiv.hasChildNodes()) {
         otherClientDiv.removeChild(otherClientDiv.lastChild);
     }
 
+    //node color
+    var nodeColor =  "#" +intToRGB(hashCode(easyrtc.idToName(selfEasyrtcid)));
+
+
+        if (nodes._data[easyrtc.idToName(selfEasyrtcid)] === undefined) {
+            try {
+                nodes.add({
+                    id: easyrtc.idToName(selfEasyrtcid),
+                    label: "Me",
+                    shape: "icon",
+                    icon: {
+                        face: 'FontAwesome',
+                        code: '\uf007',
+                        size: 50,
+                        color: nodeColor
+                    }
+                });
+            }
+
+            catch (err) {
+                alert(err);
+            }
+        }
+
+    //addNode(easyrtc.idToName(selfEasyrtcid), "Me", nodeColor, false);
+
 
     for (var easyrtcid in occupants) {
+        nodeColor =  "#" +intToRGB(hashCode(easyrtc.idToName(easyrtcid)));
+        if (nodes._data[easyrtc.idToName(easyrtcid)] === undefined) {
+            try {
+                nodes.add({
+                    id: easyrtc.idToName(easyrtcid),
+                    label: easyrtc.idToName(easyrtcid),
+                    shape: "icon",
+                    icon: {
+                        face: 'FontAwesome',
+                        code: '\uf007',
+                        size: 50,
+                        color: nodeColor
+                    }
+                });
+            }
 
+            catch (err) {
+                alert(err);
+            }
+        }
+        //addNode(easyrtc.idToName(easyrtcid), easyrtc.idToName(easyrtcid), nodeColor, false);
 
-        elements.push(
-            {group: "nodes", data: {id: easyrtc.idToName(selfEasyrtcid), label: easyrtc.idToName(selfEasyrtcid)}},
-            {group: "nodes", data: {id: easyrtc.idToName(easyrtcid), label: easyrtc.idToName(selfEasyrtcid)}}
-        )
 
         var button = document.createElement('button');
         button.onclick = function (easyrtcid) {
@@ -85,12 +126,10 @@ function sendStuffWS(otherEasyrtcid) {
         return;
     }
 
-
-
     var data = {
-        messageId : generateMessageId(selfEasyrtcid, text),
+        messageId: generateMessageId(easyrtc.idToName(selfEasyrtcid), text),
         author: selfEasyrtcid,
-        date: new Date(),
+        date: getDate(),
         parentMessageId: getParentMessageId(),
         content: text
     };
@@ -115,10 +154,14 @@ function loginFailure(errorCode, message) {
 // Tools
 //
 
- function generateMessageId(author, message) {
-     //TODO real UUID
-    return author + "_" +  message.substr(2,5) + "_" + Math.random().toString(36).substr(2, 9);
- }
+function getDate() {
+    return new Date().getTime();
+}
+
+function generateMessageId(author, message) {
+    //TODO real UUID
+    return getDate() + "_" + author + "_" + message.substr(2, 5) + "_" + Math.random().toString(36).substr(2, 9);
+}
 
 //temporary parent message management
 var parentMessageId = null;
@@ -138,151 +181,222 @@ function getParentMessageId() {
 // Graph generation
 //
 
-var elements = [ // list of graph elements to start with
 
-]
+//Tests with vis.js
+var nodes;
+var edges;
+var network;
+var db;
+$(function () {
+    nodes = new vis.DataSet([]);
 
+    // create an array with edges
+    edges = new vis.DataSet([]);
 
-function generateGraph(elements) {
-    var cy = cytoscape({
-        container: document.getElementById('cy'), // container to render in
+    // create a network
+    var container = document.getElementById('cy');
+    var data = {
+        nodes: nodes,
+        edges: edges
+    };
+    var options = {
+        edges: {
+            arrows: {
+                to:     {enabled: true, scaleFactor:1, type:'arrow'}
 
-        elements: elements,
-
-        style: [ // the stylesheet for the graph
-            {
-                selector: 'node',
-                style: {
-                    'background-color': '#666',
-                    'color': '#888',
-                    'label': 'data(label)'
-
-                }
-            },
-
-            {
-                selector: 'edge',
-                style: {
-                    'width': 3,
-                    'line-color': '#ccc',
-                    'target-arrow-color': '#ccc',
-                    'target-arrow-shape': 'triangle'
-                }
             }
-        ],
-
-        layout: {
-            name: 'cose',
-
-            // Called on `layoutready`
-            ready: function () {
-            },
-
-            // Called on `layoutstop`
-            stop: function () {
-            },
-
-            // Whether to animate while running the layout
-            // true : Animate continuously as the layout is running
-            // false : Just show the end result
-            // 'end' : Animate with the end result, from the initial positions to the end positions
-            animate: true,
-
-            // Easing of the animation for animate:'end'
-            animationEasing: undefined,
-
-            // The duration of the animation for animate:'end'
-            animationDuration: undefined,
-
-            // A function that determines whether the node should be animated
-            // All nodes animated by default on animate enabled
-            // Non-animated nodes are positioned immediately when the layout starts
-            animateFilter: function (node, i) {
-                return true;
-            },
-
-
-            // The layout animates only after this many milliseconds for animate:true
-            // (prevents flashing on fast runs)
-            animationThreshold: 250,
-
-            // Number of iterations between consecutive screen positions update
-            // (0 -> only updated on the end)
-            refresh: 20,
-
-            // Whether to fit the network view after when done
-            fit: true,
-
-            // Padding on fit
-            padding: 30,
-
-            // Constrain layout bounds; { x1, y1, x2, y2 } or { x1, y1, w, h }
-            boundingBox: undefined,
-
-            // Excludes the label when calculating node bounding boxes for the layout algorithm
-            nodeDimensionsIncludeLabels: false,
-
-            // Randomize the initial positions of the nodes (true) or use existing positions (false)
-            randomize: false,
-
-            // Extra spacing between components in non-compound graphs
-            componentSpacing: 40,
-
-            // Node repulsion (non overlapping) multiplier
-            nodeRepulsion: function (node) {
-                return 2048;
-            },
-
-            // Node repulsion (overlapping) multiplier
-            nodeOverlap: 4,
-
-            // Ideal edge (non nested) length
-            idealEdgeLength: function (edge) {
-                return 32;
-            },
-
-            // Divisor to compute edge forces
-            edgeElasticity: function (edge) {
-                return 32;
-            },
-
-            // Nesting factor (multiplier) to compute ideal edge length for nested edges
-            nestingFactor: 1.2,
-
-            // Gravity force (constant)
-            gravity: 1,
-
-            // Maximum number of iterations to perform
-            numIter: 1000,
-
-            // Initial temperature (maximum node displacement)
-            initialTemp: 1000,
-
-            // Cooling factor (how the temperature is reduced between consecutive iterations
-            coolingFactor: 0.99,
-
-            // Lower temperature threshold (below this point the layout will end)
-            minTemp: 1.0,
-
-            // Pass a reference to weaver to use threads for calculations
-            weaver: false
         }
+    };
+    network = new vis.Network(container, data, options);
 
-
+    // adds event listener on nodes to get answered message's id
+    network.on('click', function (properties) {
+        var ids = properties.nodes;
+        var clickedNodes = nodes.get(ids);
+        if (clickedNodes[0] !== undefined) {
+            parentMessageId = clickedNodes[0].id;
+        }
     });
 
+    //pouchDB integration tests
+    db = new PouchDB('local_history');
+    drawFromLocalDB();
 
-    cy.on('click', 'node', function (evt) {
-        var node = evt.target;
+});
 
-        parentMessageId = node.id();
+//functions
+//adds a node
+function addNode(id, label, style, physics, group) {
+    try {
+        // will not try to make an already existing node :
+        if (nodes._data[id] === undefined) {
+            nodes.add({
+                id: id,
+                label: label,
+                color: style,
+                group: group,
+                physics: true
+            });
+        }
 
-       // sendStuffWS(node.id());
+    }
+    catch (err) {
+        alert(err);
+    }
+}
+
+function updateNode(id, label) {
+    try {
+        nodes.update({
+            id: id,
+            label: label
+        });
+    }
+    catch (err) {
+        alert(err);
+    }
+}
+
+function removeNode(id) {
+    try {
+        nodes.remove({id: id});
+    }
+    catch (err) {
+        alert(err);
+    }
+}
+
+function addEdge(id, from, to) {
+    try {
+        edges.add({
+            id: id,
+            from: from,
+            to: to
+        });
+    }
+    catch (err) {
+        alert(err);
+    }
+}
+
+function updateEdge(id, from, to) {
+    try {
+        edges.update({
+            id: id,
+            from: from,
+            to: to
+        });
+    }
+    catch (err) {
+        alert(err);
+    }
+}
+
+function removeEdge(id) {
+    try {
+        edges.remove({id: id});
+    }
+    catch (err) {
+        alert(err);
+    }
+}
 
 
+//pouchDB tests
+//adds message to local db
+function addMessagetoDB(data) {
+
+    var message = {
+        _id: data.messageId,
+        data:data
+    };
+
+    db.put(message, function callback(err, result) {
+        db.info().then(function (info) {
+            console.log(info);
+        });
+
+        // getLocalHistory();
+        if (err) {
+            console.log(err);
+        }
+    });
+}
+
+
+function drawFromLocalDB() {
+
+    //loads docs
+    db.allDocs({
+        include_docs: true,
+        attachments: true
+    }, function(err, nodesFromDb) {
+        if (err) { return console.log(err); }
+
+        //draws history from db
+        var authors = [];
+        for (var i = 0 ; i < nodesFromDb.rows.length ; i ++) {
+            var data = nodesFromDb.rows[i].doc.data;
+            var nodeColor =  "#" +intToRGB(hashCode(data.author));
+
+            //adds message
+            addNode(data.messageId, data.content, nodeColor, true);
+
+            // will create a node for the author connected to the first message
+            if (!authors.includes(data.author)) {
+                if (nodes._data[data.author] === undefined) {
+                    try {
+                        nodes.add({
+                            id: data.author,
+                            label: data.author,
+                            shape: "icon",
+                            icon: {
+                                face: 'FontAwesome',
+                                code: '\uf007',
+                                size: 50,
+                                color: nodeColor
+                            }
+                        });
+                    }
+
+                catch (err) {
+                        alert(err);
+                    }
+                }
+                //addNode(data.author, data.author, nodeColor, true, "users");
+                addEdge(data.author + data.messageId, data.author, data.messageId );
+                authors.push(data.author);
+            }
+
+            //links to parents message if not null
+            if (data.parentMessageId !== null) {
+                addEdge(getDate() + '_' + data.author + '_' + data.parentMessageId, data.parentMessageId, data.messageId)
+            }
+
+        }
     });
 
 }
 
 
-  
+//gives a random color for each user
+function hashCode(str) { // java String#hashCode
+    var hash = 0;
+    for (var i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return hash;
+}
+
+function intToRGB(i){
+    var c = (i & 0x00FFFFFF)
+        .toString(16)
+        .toUpperCase();
+
+    var result = "00000".substring(0, 6 - c.length) + c;
+    result.replace("F", "D")
+        .replace("E", "C")
+        .replace("0", "2")
+        .replace("1", "3");
+    return result;
+}
